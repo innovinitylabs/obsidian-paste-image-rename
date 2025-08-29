@@ -62,7 +62,7 @@ var require_package = __commonJS({
   "package.json"(exports, module2) {
     module2.exports = {
       name: "obsidian-paste-image-rename",
-      version: "1.6.1",
+      version: "1.7.0",
       main: "main.js",
       scripts: {
         start: "node esbuild.config.mjs",
@@ -467,6 +467,7 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
   constructor() {
     super(...arguments);
     this.modals = [];
+    this.isProcessingCompression = false;
   }
   onload() {
     return __async(this, null, function* () {
@@ -820,9 +821,7 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
         const compressedBuffer = yield compressedBlob.arrayBuffer();
         const newFile = yield this.app.vault.createBinary(newPath, compressedBuffer);
         debugLog("Compression: new file created", { newFilePath: newFile.path });
-        setTimeout(() => {
-          this.isProcessingCompression = false;
-        }, 500);
+        this.isProcessingCompression = false;
         return newFile;
       } catch (error) {
         console.error("Format conversion failed:", error);
@@ -1052,7 +1051,8 @@ var ImageRenameModal = class extends import_obsidian2.Modal {
     }
     const doRename = () => __async(this, null, function* () {
       debugLog("doRename", `stem=${stem}, format=${selectedFormat}`);
-      this.renameFunc(getNewName(stem), selectedFormat !== ext ? selectedFormat : void 0);
+      const finalName = stem + "." + (selectedFormat || ext);
+      this.renameFunc(finalName, selectedFormat !== ext ? selectedFormat : void 0);
     });
     const nameSetting = new import_obsidian2.Setting(contentEl).setName("New name").setDesc("Please input the new name for the image (without extension)").addText((text) => text.setValue(stem).onChange(
       (value) => __async(this, null, function* () {

@@ -83,6 +83,7 @@ export default class PasteImageRenamePlugin extends Plugin {
 	settings: PluginSettings
 	modals: Modal[] = []
 	excludeExtensionRegex: RegExp
+	isProcessingCompression = false
 
 	async onload() {
 		// eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -104,7 +105,7 @@ export default class PasteImageRenamePlugin extends Plugin {
 					return
 				
 				// CRITICAL FIX: Ignore files created by our compression process
-				if ((this as any).isProcessingCompression) {
+				if (this.isProcessingCompression) {
 					debugLog('ignoring file created by compression process', file.path)
 					return
 				}
@@ -478,7 +479,7 @@ export default class PasteImageRenamePlugin extends Plugin {
 	async compressToFormat(file: TFile, targetFormat: string): Promise<TFile | null> {
 		try {
 			// Set flag to prevent file creation event from triggering
-			(this as any).isProcessingCompression = true;
+			this.isProcessingCompression = true;
 			
 			const arrayBuffer = await this.app.vault.readBinary(file);
 			const blob = new Blob([arrayBuffer]);
@@ -506,16 +507,15 @@ export default class PasteImageRenamePlugin extends Plugin {
 			
 			debugLog('Compression: new file created', { newFilePath: newFile.path });
 			
-			// Clear the flag after a delay to allow file system operations to complete
-			setTimeout(() => {
-				(this as any).isProcessingCompression = false;
-			}, 500);
+			// Clear the flag after file system operations complete
+			// Use a more robust approach with immediate flag clearing after successful creation
+			this.isProcessingCompression = false;
 			
 			return newFile;
 		} catch (error) {
 			console.error('Format conversion failed:', error);
 			// Make sure to clear flag even on error
-			(this as any).isProcessingCompression = false;
+			this.isProcessingCompression = false;
 			return null;
 		}
 	}
@@ -797,7 +797,9 @@ class ImageRenameModal extends Modal {
 
 		const doRename = async () => {
 			debugLog('doRename', `stem=${stem}, format=${selectedFormat}`)
-			this.renameFunc(getNewName(stem), selectedFormat !== ext ? selectedFormat : undefined)
+			// Construct the final name with correct extension
+			const finalName = stem + '.' + (selectedFormat || ext);
+			this.renameFunc(finalName, selectedFormat !== ext ? selectedFormat : undefined)
 		}
 
 		const nameSetting = new Setting(contentEl)
