@@ -381,13 +381,11 @@ export default class PasteImageRenamePlugin extends Plugin {
 						// Generate new link text for the final file
 						const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path)
 						
-						// Update the link in the editor
+						// Update ALL occurrences of the link in the editor
 						const editor = this.getActiveEditor()
 						if (editor && originalLinkText !== newLinkText) {
-							const content = editor.getValue()
-							const updatedContent = content.replace(originalLinkText, newLinkText)
-							editor.setValue(updatedContent)
-							debugLog('Updated link in batch conversion:', originalLinkText, '→', newLinkText)
+							this.replaceAllLinksInEditor(editor, originalLinkText, newLinkText)
+							debugLog('Updated all links in batch conversion:', originalLinkText, '→', newLinkText)
 						}
 					}
 					
@@ -454,13 +452,11 @@ export default class PasteImageRenamePlugin extends Plugin {
 					// Generate new link text for the final file
 					const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path)
 					
-					// Update the link in the editor
+					// Update ALL occurrences of the link in the editor
 					const editor = this.getActiveEditor()
 					if (editor && originalLinkText !== newLinkText) {
-						const content = editor.getValue()
-						const updatedContent = content.replace(originalLinkText, newLinkText)
-						editor.setValue(updatedContent)
-						debugLog('Updated link in batch conversion:', originalLinkText, '→', newLinkText)
+						this.replaceAllLinksInEditor(editor, originalLinkText, newLinkText)
+						debugLog('Updated all links in batch conversion:', originalLinkText, '→', newLinkText)
 					}
 				}
 				
@@ -599,6 +595,43 @@ export default class PasteImageRenamePlugin extends Plugin {
 	getActiveEditor() {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView)
 		return view?.editor
+	}
+
+	replaceAllLinksInEditor(editor: any, originalLinkText: string, newLinkText: string) {
+		if (!editor || originalLinkText === newLinkText) return
+		
+		const content = editor.getValue()
+		
+		// Use a more robust approach to handle different link formats
+		// Create regex patterns to match various link formats
+		const escapedOriginal = originalLinkText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+		
+		// Try multiple replacement strategies:
+		
+		// 1. Exact match replacement (most common)
+		let updatedContent = content.replace(new RegExp(escapedOriginal, 'g'), newLinkText)
+		
+		// 2. Handle cases where the link might be encoded differently
+		if (originalLinkText.includes('%20')) {
+			const unescapedOriginal = originalLinkText.replace(/%20/g, ' ')
+			const escapedUnescaped = unescapedOriginal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+			updatedContent = updatedContent.replace(new RegExp(escapedUnescaped, 'g'), newLinkText)
+		}
+		
+		// 3. Handle cases where spaces might be encoded as %20 in one but not the other
+		if (originalLinkText.includes(' ')) {
+			const encodedOriginal = originalLinkText.replace(/ /g, '%20')
+			const escapedEncoded = encodedOriginal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+			updatedContent = updatedContent.replace(new RegExp(escapedEncoded, 'g'), newLinkText)
+		}
+		
+		// Apply the changes if content was modified
+		if (content !== updatedContent) {
+			editor.setValue(updatedContent)
+			debugLog('Replaced all occurrences:', { originalLinkText, newLinkText, changes: content.length - updatedContent.length })
+		} else {
+			debugLog('No replacements made for:', originalLinkText)
+		}
 	}
 
 	onunload() {

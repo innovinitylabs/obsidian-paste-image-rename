@@ -913,10 +913,8 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
             const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path);
             const editor = this.getActiveEditor();
             if (editor && originalLinkText !== newLinkText) {
-              const content = editor.getValue();
-              const updatedContent = content.replace(originalLinkText, newLinkText);
-              editor.setValue(updatedContent);
-              debugLog("Updated link in batch conversion:", originalLinkText, "\u2192", newLinkText);
+              this.replaceAllLinksInEditor(editor, originalLinkText, newLinkText);
+              debugLog("Updated all links in batch conversion:", originalLinkText, "\u2192", newLinkText);
             }
           }
           new import_obsidian2.Notice(`Successfully converted and renamed: ${file.name} \u2192 ${finalName}`);
@@ -968,10 +966,8 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
             const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path);
             const editor = this.getActiveEditor();
             if (editor && originalLinkText !== newLinkText) {
-              const content = editor.getValue();
-              const updatedContent = content.replace(originalLinkText, newLinkText);
-              editor.setValue(updatedContent);
-              debugLog("Updated link in batch conversion:", originalLinkText, "\u2192", newLinkText);
+              this.replaceAllLinksInEditor(editor, originalLinkText, newLinkText);
+              debugLog("Updated all links in batch conversion:", originalLinkText, "\u2192", newLinkText);
             }
           }
           convertedCount++;
@@ -1092,6 +1088,29 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
   getActiveEditor() {
     const view = this.app.workspace.getActiveViewOfType(import_obsidian2.MarkdownView);
     return view == null ? void 0 : view.editor;
+  }
+  replaceAllLinksInEditor(editor, originalLinkText, newLinkText) {
+    if (!editor || originalLinkText === newLinkText)
+      return;
+    const content = editor.getValue();
+    const escapedOriginal = originalLinkText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    let updatedContent = content.replace(new RegExp(escapedOriginal, "g"), newLinkText);
+    if (originalLinkText.includes("%20")) {
+      const unescapedOriginal = originalLinkText.replace(/%20/g, " ");
+      const escapedUnescaped = unescapedOriginal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      updatedContent = updatedContent.replace(new RegExp(escapedUnescaped, "g"), newLinkText);
+    }
+    if (originalLinkText.includes(" ")) {
+      const encodedOriginal = originalLinkText.replace(/ /g, "%20");
+      const escapedEncoded = encodedOriginal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      updatedContent = updatedContent.replace(new RegExp(escapedEncoded, "g"), newLinkText);
+    }
+    if (content !== updatedContent) {
+      editor.setValue(updatedContent);
+      debugLog("Replaced all occurrences:", { originalLinkText, newLinkText, changes: content.length - updatedContent.length });
+    } else {
+      debugLog("No replacements made for:", originalLinkText);
+    }
   }
   onunload() {
     this.modals.map((modal) => modal.close());
