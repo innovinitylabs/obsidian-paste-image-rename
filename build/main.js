@@ -905,6 +905,36 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
         return "jpg";
     }
   }
+  getOptimalDefaultFormat(originalExtension) {
+    if (!this.settings.enableCompression) {
+      return originalExtension;
+    }
+    if (this.settings.outputFormat !== "auto") {
+      return this.settings.outputFormat;
+    }
+    if (this.settings.smartFormatSelection) {
+      if (this.supportsAvif() && originalExtension !== "gif") {
+        return "avif";
+      } else if (this.supportsWebp()) {
+        return "webp";
+      } else {
+        return "jpg";
+      }
+    }
+    return "webp";
+  }
+  supportsAvif() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    return canvas.toDataURL("image/avif", 0.5).indexOf("data:image/avif") === 0;
+  }
+  supportsWebp() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    return canvas.toDataURL("image/webp", 0.5).indexOf("data:image/webp") === 0;
+  }
 };
 function getFirstHeading(headings) {
   if (headings && headings.length > 0) {
@@ -989,16 +1019,29 @@ var ImageRenameModal = class extends import_obsidian2.Modal {
         }
       ]
     });
-    let selectedFormat = ext;
+    const defaultFormat = this.plugin.getOptimalDefaultFormat(ext);
+    let selectedFormat = defaultFormat;
+    debugLog("Modal format selection:", {
+      originalExtension: ext,
+      defaultFormat,
+      outputFormatSetting: this.plugin.settings.outputFormat,
+      compressionEnabled: this.plugin.settings.enableCompression,
+      smartFormatSelection: this.plugin.settings.smartFormatSelection
+    });
     if (this.plugin.settings.enableCompression) {
       const formatSetting = new import_obsidian2.Setting(contentEl).setName("Output format").setDesc("Choose the output format for the image").addDropdown((dropdown) => {
-        dropdown.addOption(ext, `Keep original (${ext.toUpperCase()})`).addOption("jpg", "JPG (smaller, lossy)").addOption("webp", "WebP (modern, good compression)").addOption("avif", "AVIF (best compression)").setValue(ext).onChange((value) => {
+        dropdown.addOption(ext, `Keep original (${ext.toUpperCase()})`).addOption("jpg", "JPG (smaller, lossy)").addOption("webp", "WebP (modern, good compression)").addOption("avif", "AVIF (best compression)").setValue(defaultFormat).onChange((value) => {
           selectedFormat = value;
           const newName = stem + "." + selectedFormat;
           const newPath = path.join(this.src.parent.path, newName);
           infoET.children[1].children[1].el.innerText = newPath;
         });
       });
+      if (defaultFormat !== ext) {
+        const initialName = stem + "." + defaultFormat;
+        const initialPath = path.join(this.src.parent.path, initialName);
+        infoET.children[1].children[1].el.innerText = initialPath;
+      }
       const compressionInfo = contentEl.createDiv({
         cls: "compression-info",
         text: "Compression settings can be adjusted in plugin settings"

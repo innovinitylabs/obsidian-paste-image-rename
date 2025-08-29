@@ -593,6 +593,47 @@ export default class PasteImageRenamePlugin extends Plugin {
 			default: return 'jpg';
 		}
 	}
+
+	getOptimalDefaultFormat(originalExtension: string): string {
+		// If compression is disabled, always keep original
+		if (!this.settings.enableCompression) {
+			return originalExtension;
+		}
+
+		// If output format is set to something specific, use that
+		if (this.settings.outputFormat !== 'auto') {
+			return this.settings.outputFormat;
+		}
+
+		// If auto mode and smart format selection is enabled
+		if (this.settings.smartFormatSelection) {
+			// Smart format selection logic
+			if (this.supportsAvif() && originalExtension !== 'gif') {
+				return 'avif';
+			} else if (this.supportsWebp()) {
+				return 'webp';
+			} else {
+				return 'jpg';
+			}
+		}
+
+		// Default fallback
+		return 'webp';
+	}
+
+	supportsAvif(): boolean {
+		const canvas = document.createElement('canvas');
+		canvas.width = 1;
+		canvas.height = 1;
+		return canvas.toDataURL('image/avif', 0.5).indexOf('data:image/avif') === 0;
+	}
+
+	supportsWebp(): boolean {
+		const canvas = document.createElement('canvas');
+		canvas.width = 1;
+		canvas.height = 1;
+		return canvas.toDataURL('image/webp', 0.5).indexOf('data:image/webp') === 0;
+	}
 }
 
 function getFirstHeading(headings?: HeadingCache[]) {
@@ -706,7 +747,16 @@ class ImageRenameModal extends Modal {
 		})
 
 		// Add format selection if compression is enabled
-		let selectedFormat = ext; // Default to original format
+		const defaultFormat = this.plugin.getOptimalDefaultFormat(ext);
+		let selectedFormat = defaultFormat; // Use settings-based default
+		
+		debugLog('Modal format selection:', {
+			originalExtension: ext,
+			defaultFormat,
+			outputFormatSetting: this.plugin.settings.outputFormat,
+			compressionEnabled: this.plugin.settings.enableCompression,
+			smartFormatSelection: this.plugin.settings.smartFormatSelection
+		});
 		
 		if (this.plugin.settings.enableCompression) {
 			const formatSetting = new Setting(contentEl)
@@ -718,7 +768,7 @@ class ImageRenameModal extends Modal {
 						.addOption('jpg', 'JPG (smaller, lossy)')
 						.addOption('webp', 'WebP (modern, good compression)')
 						.addOption('avif', 'AVIF (best compression)')
-						.setValue(ext)
+						.setValue(defaultFormat) // Set to optimal default from settings
 						.onChange(value => {
 							selectedFormat = value;
 							// Update the new path display
@@ -727,6 +777,13 @@ class ImageRenameModal extends Modal {
 							infoET.children[1].children[1].el.innerText = newPath;
 						});
 				});
+
+			// Update the initial path display to show default format
+			if (defaultFormat !== ext) {
+				const initialName = stem + '.' + defaultFormat;
+				const initialPath = path.join(this.src.parent.path, initialName);
+				infoET.children[1].children[1].el.innerText = initialPath;
+			}
 
 			// Add compression info
 			const compressionInfo = contentEl.createDiv({
