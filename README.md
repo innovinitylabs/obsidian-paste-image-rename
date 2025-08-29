@@ -3,7 +3,7 @@
 > :loudspeaker: Starting from 1.4.0, Paste image rename becomes a general-purpose renaming plugin
 > that can handle all attachments added to the vault.
 >
-> :new: **NEW in 1.7.0**: Added automatic image compression to reduce file sizes!
+> :new: **ENHANCED in 1.8.0**: Advanced image compression with AVIF, WebP, smart format selection, and batch compression!
 
 This plugin is inspired by Zettlr, Zettlr shows a prompt that allows the user to rename the image, this is a great help if you want your images to be named and organized clearly.
 
@@ -124,34 +124,65 @@ that match the given extension pattern.
 
 ### Image compression
 
-> New in 1.7.0
+> Enhanced in 1.8.0 with AVIF, WebP, smart format selection, and batch compression!
 
-The plugin now includes automatic image compression to reduce file sizes, which is especially useful for high-resolution screenshots from 4K displays.
+The plugin now includes advanced automatic image compression to dramatically reduce file sizes while maintaining quality. Perfect for high-resolution screenshots, photos, and keeping your Obsidian vault lightweight.
 
 **Key features:**
-- **Automatic compression** of pasted images
-- **Resize large images** to specified maximum dimensions
-- **Format conversion** (PNG to JPG for better compression)
-- **Configurable quality settings** for JPG compression
-- **Size reporting** showing bytes saved
+- **Multiple format support**: PNG, JPG, WebP, and AVIF compression
+- **Smart format selection**: Automatically chooses the best format based on image type and browser support
+- **Resolution scaling**: Resize large images while maintaining aspect ratio
+- **Batch compression**: Compress all existing images in your vault at once
+- **Format-specific quality settings**: Fine-tune compression for each format
+- **Browser compatibility**: Automatic fallback to supported formats
+- **Size reporting**: Detailed feedback on compression savings
 
 **How it works:**
-1. When you paste an image, it's automatically compressed before being renamed
+1. When you paste an image, it's automatically analyzed and compressed using the optimal format
 2. Large images are resized to your specified maximum dimensions
-3. Images can be converted from PNG to JPG for better compression ratios
-4. You'll see a notification showing how much space was saved
+3. Smart format selection chooses AVIF for maximum compression, WebP for good compression, or JPG as fallback
+4. Format conversion happens automatically with quality preservation
+5. You'll see notifications showing compression results and space saved
 
-**Example:**
+**Example compression results:**
 - Original: 2.5MB PNG screenshot
-- Compressed: 200KB JPG (90% size reduction!)
+- AVIF: 150KB (94% size reduction!)
+- WebP: 200KB (92% size reduction)
+- JPG: 300KB (88% size reduction)
 
-**Compression settings:**
-- **Enable compression**: Turn on/off automatic compression
-- **Output format**: Choose PNG (lossless) or JPG (lossy, smaller)
-- **JPG quality**: Quality setting for JPG compression (1-100)
-- **Maximum width/height**: Resize images larger than these dimensions
+### Batch compression
 
-This feature helps keep your vault size manageable while maintaining image quality suitable for note-taking.
+> New in 1.8.0
+
+Compress all existing images in your vault with a single command! Use the "Batch compress all images in vault" command to:
+
+- Process hundreds of images automatically
+- Apply your compression settings to the entire vault
+- Get detailed progress reports and total space saved
+- Maintain all existing file links and references
+
+**Perfect for:**
+- Migrating existing large image collections
+- Optimizing vault size after adding many images
+- Applying new compression settings to old images
+
+### Advanced compression features
+
+**Smart Format Selection:**
+- **Screenshots/PNGs**: Prioritizes AVIF/WebP for maximum compression
+- **Photos**: Uses AVIF for best quality-to-size ratio
+- **Compression levels**: Low/Medium/High/Maximum presets
+
+**Format Support:**
+- **AVIF**: Best compression (up to 50% smaller than WebP), modern browsers only
+- **WebP**: Excellent compression with wide browser support
+- **JPG**: Reliable fallback with good compression
+- **PNG**: Lossless option when quality is paramount
+
+**Quality Controls:**
+- Individual quality sliders for each format (1-100)
+- Compression level presets for easy configuration
+- Aspect ratio preservation during resizing
 
 
 ## FAQ
@@ -159,6 +190,26 @@ This feature helps keep your vault size manageable while maintaining image quali
 - Q: I pasted an image but the rename prompt did not show up.
 
     A: This is probably because you are using the Windows system and pasting from a file (i.e. the image is copied from File Explorer, not from a browser or image viewer). In Windows, pasting from a file is like a regular file transfer, the original filename is kept rather than being created and named "Pasted image ..." by Obsidian. You need to turn on "Handle all attachments" in settings to make it work in this situation.
+
+- Q: Which image format should I choose for best compression?
+
+    A: For maximum compression with modern browsers, use AVIF (up to 50% smaller than WebP). For wide compatibility, use WebP. For guaranteed support across all browsers, use JPG. Enable "Smart format selection" to automatically choose the best format for each image type.
+
+- Q: My browser doesn't support AVIF/WebP. What happens?
+
+    A: The plugin automatically detects browser capabilities and falls back to supported formats. You'll see a compatibility warning on startup, and compression will use the best available format.
+
+- Q: Can I compress images I've already added to my vault?
+
+    A: Yes! Use the "Batch compress all images in vault" command to compress all existing images according to your current settings. This is perfect for optimizing your vault after adding many images.
+
+- Q: How much space can I save with compression?
+
+    A: Typical savings: PNG screenshots can be reduced by 80-95% (2.5MB → 150KB with AVIF), photos by 70-90%, depending on quality settings and original image characteristics.
+
+- Q: Will compression affect image quality noticeably?
+
+    A: With proper quality settings (80-90%), compression is virtually indistinguishable for most note-taking purposes. You can always adjust quality sliders to find the perfect balance between size and quality.
 
 ## Settings
 
@@ -201,7 +252,7 @@ This feature helps keep your vault size manageable while maintaining image quali
 
 #### Image Compression Settings
 
-> New in 1.7.0
+> Enhanced in 1.8.0
 
 - **Enable compression**
 
@@ -209,11 +260,27 @@ This feature helps keep your vault size manageable while maintaining image quali
 
 - **Output format**
 
-  Format to save compressed images as. JPG typically provides better compression than PNG.
+  Format to save compressed images as. AVIF provides best compression, WebP is widely supported, JPG is reliable fallback.
+
+- **Compression level**
+
+  Overall compression level: Low (fast), Medium (balanced), High (better compression), Maximum (best compression, may be slower).
+
+- **Smart format selection**
+
+  Automatically choose the best format based on image type and browser support. Recommended for optimal results.
 
 - **JPG quality**
 
-  Quality setting for JPG compression (1-100). Higher values mean better quality but larger files.
+  Quality setting for JPG compression (1-100). Higher values = better quality but larger files.
+
+- **WebP quality**
+
+  Quality setting for WebP compression (1-100). Higher values = better quality but larger files.
+
+- **AVIF quality**
+
+  Quality setting for AVIF compression (1-100). Higher values = better quality but larger files.
 
 - **Maximum width**
 
@@ -222,3 +289,11 @@ This feature helps keep your vault size manageable while maintaining image quali
 - **Maximum height**
 
   Maximum height in pixels for resized images. Images larger than this will be scaled down proportionally.
+
+#### New Commands
+
+> New in 1.8.0
+
+- **Batch compress all images in vault**
+
+  Compress all existing images in your vault according to your compression settings. Perfect for optimizing existing image collections.

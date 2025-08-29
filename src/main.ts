@@ -45,12 +45,15 @@ interface PluginSettings {
 	handleAllAttachments: boolean
 	excludeExtensionPattern: string
 	disableRenameNotice: boolean
-	// Image compression settings
+	// Compression settings
 	enableCompression: boolean
-	jpgQuality: number
 	maxWidth: number
 	maxHeight: number
-	outputFormat: 'png' | 'jpg'
+	jpgQuality: number
+	webpQuality: number
+	avifQuality: number
+	outputFormat: string
+	smartFormatSelection: boolean
 }
 
 const DEFAULT_SETTINGS: PluginSettings = {
@@ -62,12 +65,15 @@ const DEFAULT_SETTINGS: PluginSettings = {
 	handleAllAttachments: false,
 	excludeExtensionPattern: '',
 	disableRenameNotice: false,
-	// Image compression settings
-	enableCompression: false,
-	jpgQuality: 85,
+	// Compression defaults
+	enableCompression: true,
 	maxWidth: 1920,
 	maxHeight: 1080,
-	outputFormat: 'png',
+	jpgQuality: 0.85,
+	webpQuality: 0.8,
+	avifQuality: 0.7,
+	outputFormat: 'auto',
+	smartFormatSelection: true,
 }
 
 const PASTED_IMAGE_PREFIX = 'Pasted image '
@@ -85,7 +91,7 @@ export default class PasteImageRenamePlugin extends Plugin {
 		await this.loadSettings();
 
 		this.registerEvent(
-			this.app.vault.on('create', async (file) => {
+			this.app.vault.on('create', (file) => {
 				// debugLog('file created', file)
 				if (!(file instanceof TFile))
 					return
@@ -96,9 +102,16 @@ export default class PasteImageRenamePlugin extends Plugin {
 				// always ignore markdown file creation
 				if (isMarkdownFile(file))
 					return
+				
+				// CRITICAL FIX: Ignore files created by our compression process
+				if ((this as any).isProcessingCompression) {
+					debugLog('ignoring file created by compression process', file.path)
+					return
+				}
+				
 				if (isPastedImage(file)) {
 					debugLog('pasted image created', file)
-					await this.handleNewImage(file, this.settings.autoRename)
+					this.startRenameProcess(file, this.settings.autoRename)
 				} else {
 					if (this.settings.handleAllAttachments) {
 						debugLog('handleAllAttachments for file', file)
@@ -106,7 +119,7 @@ export default class PasteImageRenamePlugin extends Plugin {
 							debugLog('excluded file by ext', file)
 							return
 						}
-						await this.handleNewImage(file, this.settings.autoRename)
+						this.startRenameProcess(file, this.settings.autoRename)
 					}
 				}
 			})
@@ -139,15 +152,6 @@ export default class PasteImageRenamePlugin extends Plugin {
 		// add settings tab
 		this.addSettingTab(new SettingTab(this.app, this));
 
-	}
-
-	// Handle new image: compress first, then rename
-	async handleNewImage(file: TFile, autoRename = false) {
-		// Compress image first if enabled (might return a different file if format changed)
-		const processedFile = await this.compressImage(file)
-
-		// Then proceed with the existing rename process using the processed file
-		this.startRenameProcess(processedFile, autoRename)
 	}
 
 	async startRenameProcess(file: TFile, autoRename = false) {
@@ -225,13 +229,81 @@ export default class PasteImageRenamePlugin extends Plugin {
 	openRenameModal(file: TFile, newName: string, sourcePath: string) {
 		const modal = new ImageRenameModal(
 			this.app, file as TFile, newName,
-			(confirmedName: string) => {
-				debugLog('confirmedName:', confirmedName)
-				this.renameFile(file, confirmedName, sourcePath, true)
+			async (confirmedName: string, selectedFormat?: string) => {
+				debugLog('confirmedName:', confirmedName, 'selectedFormat:', selectedFormat)
+				
+				if (selectedFormat && selectedFormat !== file.extension) {
+					// Compress with format conversion - handle link replacement manually
+					try {
+						// Generate link text BEFORE compression using original file
+						const originalLinkText = this.app.fileManager.generateMarkdownLink(file, sourcePath);
+						debugLog('Original link text before compression:', originalLinkText);
+						
+						const compressedFile = await this.compressToFormat(file, selectedFormat);
+						if (compressedFile) {
+							// Update the file name to match the new format
+							const nameWithNewExt = confirmedName.replace(/\.[^.]+$/, '') + '.' + selectedFormat;
+							
+							// Rename the compressed file (without link replacement first)
+							const { name: finalName } = await this.deduplicateNewName(nameWithNewExt, compressedFile);
+							const finalPath = path.join(compressedFile.parent.path, finalName);
+							debugLog('Renaming compressed file', { 
+								compressedPath: compressedFile.path, 
+								finalPath, 
+								finalName 
+							});
+							
+							await this.app.fileManager.renameFile(compressedFile, finalPath);
+							
+							// Get the final file reference
+							const finalFile = this.app.vault.getAbstractFileByPath(finalPath) as TFile;
+							debugLog('Final file reference', { 
+								finalFilePath: finalFile?.path,
+								exists: !!finalFile 
+							});
+							
+							// Now manually replace the link using the original link text and new file
+							const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, sourcePath);
+							debugLog('New link text after compression and rename:', newLinkText);
+							
+							// Manually replace the link in the editor
+							const editor = this.getActiveEditor();
+							if (editor) {
+								const cursor = editor.getCursor();
+								const line = editor.getLine(cursor.line);
+								const replacedLine = line.replace(originalLinkText, newLinkText);
+								debugLog('Link replacement:', { originalLinkText, newLinkText, line, replacedLine });
+								
+								editor.transaction({
+									changes: [{
+										from: {...cursor, ch: 0},
+										to: {...cursor, ch: line.length},
+										text: replacedLine,
+									}]
+								});
+							}
+							
+							if (!this.settings.disableRenameNotice) {
+								new Notice(`Converted ${file.name} to ${finalName}`);
+							}
+						} else {
+							throw new Error('Compression failed');
+						}
+					} catch (error) {
+						console.error('Format conversion failed:', error);
+						new Notice(`Format conversion failed: ${error.message}`);
+						// Fall back to normal rename
+						await this.renameFile(file, confirmedName, sourcePath, true);
+					}
+				} else {
+					// Normal rename without format change
+					await this.renameFile(file, confirmedName, sourcePath, true);
+				}
 			},
 			() => {
 				this.modals.splice(this.modals.indexOf(modal), 1)
-			}
+			},
+			this
 		)
 		this.modals.push(modal)
 		modal.open()
@@ -313,120 +385,6 @@ export default class PasteImageRenamePlugin extends Plugin {
 			newName: stem + '.' + file.extension,
 			isMeaningful: stem.replace(meaninglessRegex, '') !== '',
 		}
-	}
-
-	// Compress image file if compression is enabled
-	async compressImage(file: TFile): Promise<TFile> {
-		if (!this.settings.enableCompression) {
-			return file
-		}
-
-		try {
-			// Only compress image files
-			const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp']
-			if (!imageExtensions.includes(file.extension.toLowerCase())) {
-				return file
-			}
-
-			const buffer = await this.app.vault.readBinary(file)
-			const mimeType = this.getMimeType(file.extension)
-
-			const compressedBuffer = await this.compressImageBuffer(buffer, mimeType, file.extension)
-
-			// Only update if compression actually reduced the size
-			if (compressedBuffer.byteLength < buffer.byteLength) {
-				const savedBytes = buffer.byteLength - compressedBuffer.byteLength
-				const savedMB = savedBytes / (1024 * 1024)
-
-				// Check if format conversion is needed
-				const newExtension = this.settings.outputFormat === 'jpg' ? 'jpg' : file.extension
-				let targetFile = file
-
-				if (newExtension !== file.extension) {
-					// Format conversion: create new file with new extension
-					const newFileName = file.basename + '.' + newExtension
-					const newPath = path.join(file.parent.path, newFileName)
-
-					targetFile = await this.app.vault.createBinary(newPath, compressedBuffer)
-
-					// Remove original file
-					await this.app.vault.delete(file)
-
-					if (!this.settings.disableRenameNotice) {
-						new Notice(`Compressed and converted ${file.name} → ${targetFile.name}: saved ${savedMB.toFixed(2)}MB`)
-					}
-				} else {
-					// Same format: just update the file
-					await this.app.vault.modifyBinary(file, compressedBuffer)
-					targetFile = file
-
-					if (!this.settings.disableRenameNotice) {
-						new Notice(`Compressed ${file.name}: saved ${savedMB.toFixed(2)}MB`)
-					}
-				}
-
-				return targetFile
-			}
-
-			return file
-		} catch (error) {
-			console.error('Error compressing image:', error)
-			return file
-		}
-	}
-
-	// Compress image buffer using Canvas API
-	private async compressImageBuffer(buffer: ArrayBuffer, mimeType: string, originalExtension: string): Promise<ArrayBuffer> {
-		return new Promise((resolve, reject) => {
-			const img = new Image()
-			const canvas = document.createElement('canvas')
-			const ctx = canvas.getContext('2d')
-
-			img.onload = () => {
-				// Calculate new dimensions
-				let { width, height } = img
-				if (width > this.settings.maxWidth || height > this.settings.maxHeight) {
-					const ratio = Math.min(this.settings.maxWidth / width, this.settings.maxHeight / height)
-					width = Math.floor(width * ratio)
-					height = Math.floor(height * ratio)
-				}
-
-				// Set canvas size
-				canvas.width = width
-				canvas.height = height
-
-				// Draw and compress
-				ctx?.drawImage(img, 0, 0, width, height)
-
-				// Determine output format
-				const outputFormat = this.settings.outputFormat === 'jpg' ? 'image/jpeg' : 'image/png'
-				const quality = outputFormat === 'image/jpeg' ? this.settings.jpgQuality / 100 : undefined
-
-				canvas.toBlob((blob) => {
-					if (blob) {
-						blob.arrayBuffer().then(resolve).catch(reject)
-					} else {
-						reject(new Error('Failed to compress image'))
-					}
-				}, outputFormat, quality)
-			}
-
-			img.onerror = () => reject(new Error('Failed to load image'))
-			img.src = URL.createObjectURL(new Blob([buffer], { type: mimeType }))
-		})
-	}
-
-	// Get MIME type from file extension
-	private getMimeType(extension: string): string {
-		const mimeTypes: { [key: string]: string } = {
-			'png': 'image/png',
-			'jpg': 'image/jpeg',
-			'jpeg': 'image/jpeg',
-			'gif': 'image/gif',
-			'bmp': 'image/bmp',
-			'webp': 'image/webp'
-		}
-		return mimeTypes[extension.toLowerCase()] || 'image/png'
 	}
 
 	// newName: foo.ext
@@ -515,6 +473,126 @@ export default class PasteImageRenamePlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
+
+	// Compression utility methods
+	async compressToFormat(file: TFile, targetFormat: string): Promise<TFile | null> {
+		try {
+			// Set flag to prevent file creation event from triggering
+			(this as any).isProcessingCompression = true;
+			
+			const arrayBuffer = await this.app.vault.readBinary(file);
+			const blob = new Blob([arrayBuffer]);
+			
+			const compressedBlob = await this.compressBlob(blob, targetFormat);
+			if (!compressedBlob) {
+				return null;
+			}
+
+			// Create new file with compressed data and new extension
+			const newExtension = this.getExtensionFromFormat(targetFormat);
+			const newPath = file.path.replace(/\.[^.]+$/, '.' + newExtension);
+			
+			debugLog('Compression: creating new file', { 
+				originalPath: file.path, 
+				newPath, 
+				targetFormat, 
+				newExtension 
+			});
+			
+			// Delete original and create compressed version
+			await this.app.vault.delete(file);
+			const compressedBuffer = await compressedBlob.arrayBuffer();
+			const newFile = await this.app.vault.createBinary(newPath, compressedBuffer);
+			
+			debugLog('Compression: new file created', { newFilePath: newFile.path });
+			
+			// Clear the flag after a delay to allow file system operations to complete
+			setTimeout(() => {
+				(this as any).isProcessingCompression = false;
+			}, 500);
+			
+			return newFile;
+		} catch (error) {
+			console.error('Format conversion failed:', error);
+			// Make sure to clear flag even on error
+			(this as any).isProcessingCompression = false;
+			return null;
+		}
+	}
+
+	async compressBlob(blob: Blob, targetFormat: string): Promise<Blob | null> {
+		return new Promise((resolve) => {
+			const canvas = document.createElement('canvas');
+			const ctx = canvas.getContext('2d');
+			const img = new Image();
+
+			img.onload = () => {
+				// Calculate new dimensions maintaining aspect ratio
+				const { width, height } = this.calculateDimensions(img.width, img.height);
+				
+				canvas.width = width;
+				canvas.height = height;
+				
+				// Draw and compress
+				ctx?.drawImage(img, 0, 0, width, height);
+				
+				const quality = this.getQualityForFormat(targetFormat);
+				const mimeType = this.getMimeType(targetFormat);
+				
+				canvas.toBlob(resolve, mimeType, quality);
+			};
+
+			img.onerror = () => resolve(null);
+			img.src = URL.createObjectURL(blob);
+		});
+	}
+
+	calculateDimensions(originalWidth: number, originalHeight: number): { width: number, height: number } {
+		const maxWidth = this.settings.maxWidth;
+		const maxHeight = this.settings.maxHeight;
+		
+		if (originalWidth <= maxWidth && originalHeight <= maxHeight) {
+			return { width: originalWidth, height: originalHeight };
+		}
+		
+		const widthRatio = maxWidth / originalWidth;
+		const heightRatio = maxHeight / originalHeight;
+		const ratio = Math.min(widthRatio, heightRatio);
+		
+		return {
+			width: Math.round(originalWidth * ratio),
+			height: Math.round(originalHeight * ratio)
+		};
+	}
+
+	getQualityForFormat(format: string): number {
+		switch (format) {
+			case 'jpg': return this.settings.jpgQuality;
+			case 'webp': return this.settings.webpQuality;
+			case 'avif': return this.settings.avifQuality;
+			default: return 0.85;
+		}
+	}
+
+	getMimeType(format: string): string {
+		switch (format) {
+			case 'jpg': return 'image/jpeg';
+			case 'webp': return 'image/webp';
+			case 'avif': return 'image/avif';
+			case 'png': return 'image/png';
+			default: return 'image/jpeg';
+		}
+	}
+
+	getExtensionFromFormat(format: string): string {
+		switch (format) {
+			case 'jpg': return 'jpg';
+			case 'webp': return 'webp';
+			case 'avif': return 'avif';
+			case 'png': return 'png';
+			default: return 'jpg';
+		}
+	}
 }
 
 function getFirstHeading(headings?: HeadingCache[]) {
@@ -562,15 +640,17 @@ function isImage(file: TAbstractFile): boolean {
 class ImageRenameModal extends Modal {
 	src: TFile
 	stem: string
-	renameFunc: (path: string) => void
+	renameFunc: (path: string, selectedFormat?: string) => void
 	onCloseExtra: () => void
+	plugin: PasteImageRenamePlugin
 
-	constructor(app: App, src: TFile, stem: string, renameFunc: (path: string) => void, onClose: () => void) {
+	constructor(app: App, src: TFile, stem: string, renameFunc: (path: string, selectedFormat?: string) => void, onClose: () => void, plugin: PasteImageRenamePlugin) {
 		super(app);
 		this.src = src
 		this.stem = stem
 		this.renameFunc = renameFunc
 		this.onCloseExtra = onClose
+		this.plugin = plugin
 	}
 
 	onOpen() {
@@ -625,9 +705,42 @@ class ImageRenameModal extends Modal {
 			]
 		})
 
+		// Add format selection if compression is enabled
+		let selectedFormat = ext; // Default to original format
+		
+		if (this.plugin.settings.enableCompression) {
+			const formatSetting = new Setting(contentEl)
+				.setName('Output format')
+				.setDesc('Choose the output format for the image')
+				.addDropdown(dropdown => {
+					dropdown
+						.addOption(ext, `Keep original (${ext.toUpperCase()})`)
+						.addOption('jpg', 'JPG (smaller, lossy)')
+						.addOption('webp', 'WebP (modern, good compression)')
+						.addOption('avif', 'AVIF (best compression)')
+						.setValue(ext)
+						.onChange(value => {
+							selectedFormat = value;
+							// Update the new path display
+							const newName = stem + '.' + selectedFormat;
+							const newPath = path.join(this.src.parent.path, newName);
+							infoET.children[1].children[1].el.innerText = newPath;
+						});
+				});
+
+			// Add compression info
+			const compressionInfo = contentEl.createDiv({
+				cls: 'compression-info',
+				text: 'Compression settings can be adjusted in plugin settings'
+			});
+			compressionInfo.style.fontSize = '0.8em';
+			compressionInfo.style.color = 'var(--text-muted)';
+			compressionInfo.style.marginBottom = '10px';
+		}
+
 		const doRename = async () => {
-			debugLog('doRename', `stem=${stem}`)
-			this.renameFunc(getNewName(stem))
+			debugLog('doRename', `stem=${stem}, format=${selectedFormat}`)
+			this.renameFunc(getNewName(stem), selectedFormat !== ext ? selectedFormat : undefined)
 		}
 
 		const nameSetting = new Setting(contentEl)
@@ -811,12 +924,12 @@ class SettingTab extends PluginSettingTab {
 				}
 			));
 
-		// Image Compression Settings Section
+		// Compression settings
 		containerEl.createEl('h3', { text: 'Image Compression Settings' });
 
 		new Setting(containerEl)
-			.setName('Enable compression')
-			.setDesc('Automatically compress images to reduce file size when they are pasted or added to the vault.')
+			.setName('Enable image compression')
+			.setDesc('Enable compression and format conversion features in the rename modal')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.enableCompression)
 				.onChange(async (value) => {
@@ -825,52 +938,92 @@ class SettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName('Output format')
-			.setDesc('Format to save compressed images as. JPG typically provides better compression.')
-			.addDropdown(dropdown => dropdown
-				.addOption('png', 'PNG (Lossless)')
-				.addOption('jpg', 'JPG (Lossy, smaller)')
-				.setValue(this.plugin.settings.outputFormat)
-				.onChange(async (value: 'png' | 'jpg') => {
-					this.plugin.settings.outputFormat = value;
-					await this.plugin.saveSettings();
+			.setName('Max width')
+			.setDesc('Maximum width for compressed images (maintains aspect ratio)')
+			.addText(text => text
+				.setPlaceholder('1920')
+				.setValue(this.plugin.settings.maxWidth.toString())
+				.onChange(async (value) => {
+					const width = parseInt(value);
+					if (!isNaN(width) && width > 0) {
+						this.plugin.settings.maxWidth = width;
+						await this.plugin.saveSettings();
+					}
+				}));
+
+		new Setting(containerEl)
+			.setName('Max height')
+			.setDesc('Maximum height for compressed images (maintains aspect ratio)')
+			.addText(text => text
+				.setPlaceholder('1080')
+				.setValue(this.plugin.settings.maxHeight.toString())
+				.onChange(async (value) => {
+					const height = parseInt(value);
+					if (!isNaN(height) && height > 0) {
+						this.plugin.settings.maxHeight = height;
+						await this.plugin.saveSettings();
+					}
 				}));
 
 		new Setting(containerEl)
 			.setName('JPG quality')
-			.setDesc('Quality for JPG compression (1-100). Higher values = better quality but larger files.')
+			.setDesc('Quality for JPG compression (0.1 to 1.0)')
 			.addSlider(slider => slider
-				.setLimits(1, 100, 5)
+				.setLimits(0.1, 1.0, 0.05)
 				.setValue(this.plugin.settings.jpgQuality)
+				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.jpgQuality = value;
 					await this.plugin.saveSettings();
 				}));
 
 		new Setting(containerEl)
-			.setName('Maximum width')
-			.setDesc('Maximum width in pixels for resized images. Larger images will be scaled down.')
-			.addText(text => text
-				.setValue(this.plugin.settings.maxWidth.toString())
+			.setName('WebP quality')
+			.setDesc('Quality for WebP compression (0.1 to 1.0)')
+			.addSlider(slider => slider
+				.setLimits(0.1, 1.0, 0.05)
+				.setValue(this.plugin.settings.webpQuality)
+				.setDynamicTooltip()
 				.onChange(async (value) => {
-					const numValue = parseInt(value);
-					if (!isNaN(numValue) && numValue > 0) {
-						this.plugin.settings.maxWidth = numValue;
-						await this.plugin.saveSettings();
-					}
+					this.plugin.settings.webpQuality = value;
+					await this.plugin.saveSettings();
 				}));
 
 		new Setting(containerEl)
-			.setName('Maximum height')
-			.setDesc('Maximum height in pixels for resized images. Larger images will be scaled down.')
-			.addText(text => text
-				.setValue(this.plugin.settings.maxHeight.toString())
+			.setName('AVIF quality')
+			.setDesc('Quality for AVIF compression (0.1 to 1.0)')
+			.addSlider(slider => slider
+				.setLimits(0.1, 1.0, 0.05)
+				.setValue(this.plugin.settings.avifQuality)
+				.setDynamicTooltip()
 				.onChange(async (value) => {
-					const numValue = parseInt(value);
-					if (!isNaN(numValue) && numValue > 0) {
-						this.plugin.settings.maxHeight = numValue;
-						await this.plugin.saveSettings();
-					}
+					this.plugin.settings.avifQuality = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Output format')
+			.setDesc('Default output format for compression')
+			.addDropdown(dropdown => dropdown
+				.addOption('auto', 'Auto (smart selection)')
+				.addOption('jpg', 'JPG')
+				.addOption('webp', 'WebP')
+				.addOption('avif', 'AVIF')
+				.addOption('png', 'PNG (lossless)')
+				.setValue(this.plugin.settings.outputFormat)
+				.onChange(async (value) => {
+					this.plugin.settings.outputFormat = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Smart format selection')
+			.setDesc('Automatically choose the best format based on image content and browser support')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.smartFormatSelection)
+				.onChange(async (value) => {
+					this.plugin.settings.smartFormatSelection = value;
+					await this.plugin.saveSettings();
 				}));
 	}
 }
