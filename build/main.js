@@ -1061,7 +1061,6 @@ var ImageRenameModal = class extends import_obsidian2.Modal {
       })
     ));
     const nameInputEl = nameSetting.controlEl.children[0];
-    nameInputEl.focus();
     const nameInputState = lockInputMethodComposition(nameInputEl);
     nameInputEl.addEventListener("keydown", (e) => __async(this, null, function* () {
       if (e.key === "Enter" && !nameInputState.lock) {
@@ -1091,6 +1090,10 @@ var ImageRenameModal = class extends import_obsidian2.Modal {
         this.close();
       });
     });
+    setTimeout(() => {
+      nameInputEl.focus();
+      nameInputEl.select();
+    }, 0);
   }
   onClose() {
     const { contentEl } = this;

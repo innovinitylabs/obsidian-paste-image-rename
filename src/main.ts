@@ -814,7 +814,6 @@ class ImageRenameModal extends Modal {
 				))
 
 		const nameInputEl = nameSetting.controlEl.children[0] as HTMLInputElement
-		nameInputEl.focus()
 		const nameInputState = lockInputMethodComposition(nameInputEl)
 		nameInputEl.addEventListener('keydown', async (e) => {
 			// console.log('keydown', e.key, `lock=${nameInputState.lock}`)
@@ -851,6 +850,12 @@ class ImageRenameModal extends Modal {
 					.setButtonText('Cancel')
 					.onClick(() => { this.close() })
 			})
+
+		// Set focus to name input at the very end to ensure it's not stolen by other elements
+		setTimeout(() => {
+			nameInputEl.focus()
+			nameInputEl.select() // Also select all text for quick replacement
+		}, 0)
 	}
 
 	onClose() {
