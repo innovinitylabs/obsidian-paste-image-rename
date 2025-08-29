@@ -902,9 +902,11 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
         debugLog("Converting file:", file.path, "to format:", targetFormat);
         const compressedFile = yield this.compressToFormat(file, targetFormat);
         if (compressedFile) {
-          const { newName } = this.generateNewName(compressedFile, activeFile);
+          const originalBasename = file.basename;
+          const newExtension = this.getExtensionFromFormat(targetFormat);
+          const newName = originalBasename + "." + newExtension;
           yield this.renameFile(compressedFile, newName, activeFile.path, false);
-          new import_obsidian2.Notice(`Successfully converted and renamed: ${file.name} \u2192 ${newName}`);
+          new import_obsidian2.Notice(`Successfully converted: ${file.name} \u2192 ${newName}`);
         } else {
           new import_obsidian2.Notice(`Failed to convert: ${file.name}`);
         }
@@ -942,7 +944,9 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
         debugLog("Converting file to optimal format:", file.name, "\u2192", optimalFormat);
         const compressedFile = yield this.compressToFormat(file, optimalFormat);
         if (compressedFile) {
-          const { newName } = this.generateNewName(compressedFile, activeFile);
+          const originalBasename = file.basename;
+          const newExtension = this.getExtensionFromFormat(optimalFormat);
+          const newName = originalBasename + "." + newExtension;
           yield this.renameFile(compressedFile, newName, activeFile.path, false);
           convertedCount++;
         }

@@ -362,11 +362,14 @@ export default class PasteImageRenamePlugin extends Plugin {
 				
 				const compressedFile = await this.compressToFormat(file, targetFormat)
 				if (compressedFile) {
-					// Generate a proper name for the converted file
-					const { newName } = this.generateNewName(compressedFile, activeFile)
+					// For batch conversion, keep the original filename and only change extension
+					const originalBasename = file.basename
+					const newExtension = this.getExtensionFromFormat(targetFormat)
+					const newName = originalBasename + '.' + newExtension
+					
 					// Use the same approach as original batch rename - let Obsidian handle link updates
 					await this.renameFile(compressedFile, newName, activeFile.path, false)
-					new Notice(`Successfully converted and renamed: ${file.name} → ${newName}`)
+					new Notice(`Successfully converted: ${file.name} → ${newName}`)
 				} else {
 					new Notice(`Failed to convert: ${file.name}`)
 				}
@@ -410,8 +413,11 @@ export default class PasteImageRenamePlugin extends Plugin {
 			
 			const compressedFile = await this.compressToFormat(file, optimalFormat)
 			if (compressedFile) {
-				// Generate a proper name for the converted file
-				const { newName } = this.generateNewName(compressedFile, activeFile)
+				// For batch conversion, keep the original filename and only change extension
+				const originalBasename = file.basename
+				const newExtension = this.getExtensionFromFormat(optimalFormat)
+				const newName = originalBasename + '.' + newExtension
+				
 				// Use the same approach as original batch rename - let Obsidian handle link updates
 				await this.renameFile(compressedFile, newName, activeFile.path, false)
 				convertedCount++
