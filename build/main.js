@@ -900,24 +900,11 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
       activeFile,
       (file, targetFormat) => __async(this, null, function* () {
         debugLog("Converting file:", file.path, "to format:", targetFormat);
-        const originalLinkText = this.app.fileManager.generateMarkdownLink(file, activeFile.path);
         const compressedFile = yield this.compressToFormat(file, targetFormat);
         if (compressedFile) {
           const { newName } = this.generateNewName(compressedFile, activeFile);
-          const { stem, extension } = yield this.deduplicateNewName(newName, compressedFile);
-          const finalName = stem + "." + extension;
-          const finalPath = compressedFile.parent.path + "/" + finalName;
-          const renamedFile = yield this.app.fileManager.renameFile(compressedFile, finalPath);
-          const finalFile = this.app.vault.getAbstractFileByPath(finalPath);
-          if (finalFile) {
-            const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path);
-            const editor = this.getActiveEditor();
-            if (editor && originalLinkText !== newLinkText) {
-              this.replaceAllLinksInEditor(editor, originalLinkText, newLinkText);
-              debugLog("Updated all links in batch conversion:", originalLinkText, "\u2192", newLinkText);
-            }
-          }
-          new import_obsidian2.Notice(`Successfully converted and renamed: ${file.name} \u2192 ${finalName}`);
+          yield this.renameFile(compressedFile, newName, activeFile.path, false);
+          new import_obsidian2.Notice(`Successfully converted and renamed: ${file.name} \u2192 ${newName}`);
         } else {
           new import_obsidian2.Notice(`Failed to convert: ${file.name}`);
         }
@@ -953,23 +940,10 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
           continue;
         }
         debugLog("Converting file to optimal format:", file.name, "\u2192", optimalFormat);
-        const originalLinkText = this.app.fileManager.generateMarkdownLink(file, activeFile.path);
         const compressedFile = yield this.compressToFormat(file, optimalFormat);
         if (compressedFile) {
           const { newName } = this.generateNewName(compressedFile, activeFile);
-          const { stem, extension } = yield this.deduplicateNewName(newName, compressedFile);
-          const finalName = stem + "." + extension;
-          const finalPath = compressedFile.parent.path + "/" + finalName;
-          const renamedFile = yield this.app.fileManager.renameFile(compressedFile, finalPath);
-          const finalFile = this.app.vault.getAbstractFileByPath(finalPath);
-          if (finalFile) {
-            const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path);
-            const editor = this.getActiveEditor();
-            if (editor && originalLinkText !== newLinkText) {
-              this.replaceAllLinksInEditor(editor, originalLinkText, newLinkText);
-              debugLog("Updated all links in batch conversion:", originalLinkText, "\u2192", newLinkText);
-            }
-          }
+          yield this.renameFile(compressedFile, newName, activeFile.path, false);
           convertedCount++;
         }
       }
@@ -1088,29 +1062,6 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
   getActiveEditor() {
     const view = this.app.workspace.getActiveViewOfType(import_obsidian2.MarkdownView);
     return view == null ? void 0 : view.editor;
-  }
-  replaceAllLinksInEditor(editor, originalLinkText, newLinkText) {
-    if (!editor || originalLinkText === newLinkText)
-      return;
-    const content = editor.getValue();
-    const escapedOriginal = originalLinkText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    let updatedContent = content.replace(new RegExp(escapedOriginal, "g"), newLinkText);
-    if (originalLinkText.includes("%20")) {
-      const unescapedOriginal = originalLinkText.replace(/%20/g, " ");
-      const escapedUnescaped = unescapedOriginal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      updatedContent = updatedContent.replace(new RegExp(escapedUnescaped, "g"), newLinkText);
-    }
-    if (originalLinkText.includes(" ")) {
-      const encodedOriginal = originalLinkText.replace(/ /g, "%20");
-      const escapedEncoded = encodedOriginal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      updatedContent = updatedContent.replace(new RegExp(escapedEncoded, "g"), newLinkText);
-    }
-    if (content !== updatedContent) {
-      editor.setValue(updatedContent);
-      debugLog("Replaced all occurrences:", { originalLinkText, newLinkText, changes: content.length - updatedContent.length });
-    } else {
-      debugLog("No replacements made for:", originalLinkText);
-    }
   }
   onunload() {
     this.modals.map((modal) => modal.close());

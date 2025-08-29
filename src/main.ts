@@ -360,36 +360,13 @@ export default class PasteImageRenamePlugin extends Plugin {
 			async (file: TFile, targetFormat: string) => {
 				debugLog('Converting file:', file.path, 'to format:', targetFormat)
 				
-				// Capture original link text BEFORE compression
-				const originalLinkText = this.app.fileManager.generateMarkdownLink(file, activeFile.path)
-				
 				const compressedFile = await this.compressToFormat(file, targetFormat)
 				if (compressedFile) {
 					// Generate a proper name for the converted file
 					const { newName } = this.generateNewName(compressedFile, activeFile)
-					// Deduplicate and rename the file
-					const { stem, extension } = await this.deduplicateNewName(newName, compressedFile)
-					const finalName = stem + '.' + extension
-					
-					// Rename the compressed file
-					const finalPath = compressedFile.parent.path + '/' + finalName
-					const renamedFile = await this.app.fileManager.renameFile(compressedFile, finalPath)
-					
-					// Get fresh reference to the final file
-					const finalFile = this.app.vault.getAbstractFileByPath(finalPath) as TFile
-					if (finalFile) {
-						// Generate new link text for the final file
-						const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path)
-						
-						// Update ALL occurrences of the link in the editor
-						const editor = this.getActiveEditor()
-						if (editor && originalLinkText !== newLinkText) {
-							this.replaceAllLinksInEditor(editor, originalLinkText, newLinkText)
-							debugLog('Updated all links in batch conversion:', originalLinkText, '→', newLinkText)
-						}
-					}
-					
-					new Notice(`Successfully converted and renamed: ${file.name} → ${finalName}`)
+					// Use the same approach as original batch rename - let Obsidian handle link updates
+					await this.renameFile(compressedFile, newName, activeFile.path, false)
+					new Notice(`Successfully converted and renamed: ${file.name} → ${newName}`)
 				} else {
 					new Notice(`Failed to convert: ${file.name}`)
 				}
@@ -431,35 +408,12 @@ export default class PasteImageRenamePlugin extends Plugin {
 
 			debugLog('Converting file to optimal format:', file.name, '→', optimalFormat)
 			
-			// Capture original link text BEFORE compression
-			const originalLinkText = this.app.fileManager.generateMarkdownLink(file, activeFile.path)
-			
 			const compressedFile = await this.compressToFormat(file, optimalFormat)
 			if (compressedFile) {
 				// Generate a proper name for the converted file
 				const { newName } = this.generateNewName(compressedFile, activeFile)
-				// Deduplicate and rename the file
-				const { stem, extension } = await this.deduplicateNewName(newName, compressedFile)
-				const finalName = stem + '.' + extension
-				
-				// Rename the compressed file
-				const finalPath = compressedFile.parent.path + '/' + finalName
-				const renamedFile = await this.app.fileManager.renameFile(compressedFile, finalPath)
-				
-				// Get fresh reference to the final file
-				const finalFile = this.app.vault.getAbstractFileByPath(finalPath) as TFile
-				if (finalFile) {
-					// Generate new link text for the final file
-					const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path)
-					
-					// Update ALL occurrences of the link in the editor
-					const editor = this.getActiveEditor()
-					if (editor && originalLinkText !== newLinkText) {
-						this.replaceAllLinksInEditor(editor, originalLinkText, newLinkText)
-						debugLog('Updated all links in batch conversion:', originalLinkText, '→', newLinkText)
-					}
-				}
-				
+				// Use the same approach as original batch rename - let Obsidian handle link updates
+				await this.renameFile(compressedFile, newName, activeFile.path, false)
 				convertedCount++
 			}
 		}
@@ -595,43 +549,6 @@ export default class PasteImageRenamePlugin extends Plugin {
 	getActiveEditor() {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView)
 		return view?.editor
-	}
-
-	replaceAllLinksInEditor(editor: any, originalLinkText: string, newLinkText: string) {
-		if (!editor || originalLinkText === newLinkText) return
-		
-		const content = editor.getValue()
-		
-		// Use a more robust approach to handle different link formats
-		// Create regex patterns to match various link formats
-		const escapedOriginal = originalLinkText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-		
-		// Try multiple replacement strategies:
-		
-		// 1. Exact match replacement (most common)
-		let updatedContent = content.replace(new RegExp(escapedOriginal, 'g'), newLinkText)
-		
-		// 2. Handle cases where the link might be encoded differently
-		if (originalLinkText.includes('%20')) {
-			const unescapedOriginal = originalLinkText.replace(/%20/g, ' ')
-			const escapedUnescaped = unescapedOriginal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-			updatedContent = updatedContent.replace(new RegExp(escapedUnescaped, 'g'), newLinkText)
-		}
-		
-		// 3. Handle cases where spaces might be encoded as %20 in one but not the other
-		if (originalLinkText.includes(' ')) {
-			const encodedOriginal = originalLinkText.replace(/ /g, '%20')
-			const escapedEncoded = encodedOriginal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-			updatedContent = updatedContent.replace(new RegExp(escapedEncoded, 'g'), newLinkText)
-		}
-		
-		// Apply the changes if content was modified
-		if (content !== updatedContent) {
-			editor.setValue(updatedContent)
-			debugLog('Replaced all occurrences:', { originalLinkText, newLinkText, changes: content.length - updatedContent.length })
-		} else {
-			debugLog('No replacements made for:', originalLinkText)
-		}
 	}
 
 	onunload() {
