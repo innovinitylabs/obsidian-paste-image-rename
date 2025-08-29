@@ -900,6 +900,7 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
       activeFile,
       (file, targetFormat) => __async(this, null, function* () {
         debugLog("Converting file:", file.path, "to format:", targetFormat);
+        const originalLinkText = this.app.fileManager.generateMarkdownLink(file, activeFile.path);
         const compressedFile = yield this.compressToFormat(file, targetFormat);
         if (compressedFile) {
           const originalBasename = file.basename;
@@ -907,6 +908,9 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
           const newFileName = originalBasename + "." + newExtension;
           const newPath = compressedFile.parent.path + "/" + newFileName;
           yield this.app.fileManager.renameFile(compressedFile, newPath);
+          const finalFile = this.app.vault.getAbstractFileByPath(newPath);
+          const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path);
+          this.updateLinksInActiveFile(originalLinkText, newLinkText);
           new import_obsidian2.Notice(`Successfully converted: ${file.name} \u2192 ${newFileName}`);
         } else {
           new import_obsidian2.Notice(`Failed to convert: ${file.name}`);
@@ -943,6 +947,7 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
           continue;
         }
         debugLog("Converting file to optimal format:", file.name, "\u2192", optimalFormat);
+        const originalLinkText = this.app.fileManager.generateMarkdownLink(file, activeFile.path);
         const compressedFile = yield this.compressToFormat(file, optimalFormat);
         if (compressedFile) {
           const originalBasename = file.basename;
@@ -950,6 +955,9 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
           const newFileName = originalBasename + "." + newExtension;
           const newPath = compressedFile.parent.path + "/" + newFileName;
           yield this.app.fileManager.renameFile(compressedFile, newPath);
+          const finalFile = this.app.vault.getAbstractFileByPath(newPath);
+          const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path);
+          this.updateLinksInActiveFile(originalLinkText, newLinkText);
           convertedCount++;
         }
       }
@@ -1068,6 +1076,18 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
   getActiveEditor() {
     const view = this.app.workspace.getActiveViewOfType(import_obsidian2.MarkdownView);
     return view == null ? void 0 : view.editor;
+  }
+  updateLinksInActiveFile(originalLinkText, newLinkText) {
+    const editor = this.getActiveEditor();
+    if (!editor || originalLinkText === newLinkText)
+      return;
+    const content = editor.getValue();
+    const escapedOriginal = originalLinkText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const updatedContent = content.replace(new RegExp(escapedOriginal, "g"), newLinkText);
+    if (content !== updatedContent) {
+      editor.setValue(updatedContent);
+      debugLog("Updated links in active file:", originalLinkText, "\u2192", newLinkText);
+    }
   }
   onunload() {
     this.modals.map((modal) => modal.close());

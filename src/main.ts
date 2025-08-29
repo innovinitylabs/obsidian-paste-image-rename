@@ -360,6 +360,9 @@ export default class PasteImageRenamePlugin extends Plugin {
 			async (file: TFile, targetFormat: string) => {
 				debugLog('Converting file:', file.path, 'to format:', targetFormat)
 				
+				// Capture original link before compression (file gets deleted)
+				const originalLinkText = this.app.fileManager.generateMarkdownLink(file, activeFile.path)
+				
 				const compressedFile = await this.compressToFormat(file, targetFormat)
 				if (compressedFile) {
 					// For batch conversion, keep the exact same filename and only change extension
@@ -367,9 +370,14 @@ export default class PasteImageRenamePlugin extends Plugin {
 					const newExtension = this.getExtensionFromFormat(targetFormat)
 					const newFileName = originalBasename + '.' + newExtension
 					
-					// Simple rename to change only the extension - let Obsidian handle link updates
+					// Rename the compressed file to match original basename
 					const newPath = compressedFile.parent.path + '/' + newFileName
 					await this.app.fileManager.renameFile(compressedFile, newPath)
+					
+					// Get the final file reference and update links manually
+					const finalFile = this.app.vault.getAbstractFileByPath(newPath) as TFile
+					const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path)
+					this.updateLinksInActiveFile(originalLinkText, newLinkText)
 					
 					new Notice(`Successfully converted: ${file.name} → ${newFileName}`)
 				} else {
@@ -413,6 +421,9 @@ export default class PasteImageRenamePlugin extends Plugin {
 
 			debugLog('Converting file to optimal format:', file.name, '→', optimalFormat)
 			
+			// Capture original link before compression (file gets deleted)
+			const originalLinkText = this.app.fileManager.generateMarkdownLink(file, activeFile.path)
+			
 			const compressedFile = await this.compressToFormat(file, optimalFormat)
 			if (compressedFile) {
 				// For batch conversion, keep the exact same filename and only change extension
@@ -420,9 +431,14 @@ export default class PasteImageRenamePlugin extends Plugin {
 				const newExtension = this.getExtensionFromFormat(optimalFormat)
 				const newFileName = originalBasename + '.' + newExtension
 				
-				// Simple rename to change only the extension - let Obsidian handle link updates
+				// Rename the compressed file to match original basename
 				const newPath = compressedFile.parent.path + '/' + newFileName
 				await this.app.fileManager.renameFile(compressedFile, newPath)
+				
+				// Get the final file reference and update links manually
+				const finalFile = this.app.vault.getAbstractFileByPath(newPath) as TFile
+				const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path)
+				this.updateLinksInActiveFile(originalLinkText, newLinkText)
 				
 				convertedCount++
 			}
@@ -559,6 +575,22 @@ export default class PasteImageRenamePlugin extends Plugin {
 	getActiveEditor() {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView)
 		return view?.editor
+	}
+
+	updateLinksInActiveFile(originalLinkText: string, newLinkText: string) {
+		const editor = this.getActiveEditor()
+		if (!editor || originalLinkText === newLinkText) return
+		
+		const content = editor.getValue()
+		
+		// Use global regex replacement to update all occurrences
+		const escapedOriginal = originalLinkText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+		const updatedContent = content.replace(new RegExp(escapedOriginal, 'g'), newLinkText)
+		
+		if (content !== updatedContent) {
+			editor.setValue(updatedContent)
+			debugLog('Updated links in active file:', originalLinkText, '→', newLinkText)
+		}
 	}
 
 	onunload() {
