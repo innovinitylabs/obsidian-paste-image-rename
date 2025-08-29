@@ -45,6 +45,12 @@ interface PluginSettings {
 	handleAllAttachments: boolean
 	excludeExtensionPattern: string
 	disableRenameNotice: boolean
+	// Image compression settings
+	enableCompression: boolean
+	jpgQuality: number
+	maxWidth: number
+	maxHeight: number
+	outputFormat: 'png' | 'jpg'
 }
 
 const DEFAULT_SETTINGS: PluginSettings = {
@@ -56,6 +62,12 @@ const DEFAULT_SETTINGS: PluginSettings = {
 	handleAllAttachments: false,
 	excludeExtensionPattern: '',
 	disableRenameNotice: false,
+	// Image compression settings
+	enableCompression: false,
+	jpgQuality: 85,
+	maxWidth: 1920,
+	maxHeight: 1080,
+	outputFormat: 'png',
 }
 
 const PASTED_IMAGE_PREFIX = 'Pasted image '
@@ -73,7 +85,7 @@ export default class PasteImageRenamePlugin extends Plugin {
 		await this.loadSettings();
 
 		this.registerEvent(
-			this.app.vault.on('create', (file) => {
+			this.app.vault.on('create', async (file) => {
 				// debugLog('file created', file)
 				if (!(file instanceof TFile))
 					return
@@ -86,7 +98,7 @@ export default class PasteImageRenamePlugin extends Plugin {
 					return
 				if (isPastedImage(file)) {
 					debugLog('pasted image created', file)
-					this.startRenameProcess(file, this.settings.autoRename)
+					await this.handleNewImage(file, this.settings.autoRename)
 				} else {
 					if (this.settings.handleAllAttachments) {
 						debugLog('handleAllAttachments for file', file)
@@ -94,7 +106,7 @@ export default class PasteImageRenamePlugin extends Plugin {
 							debugLog('excluded file by ext', file)
 							return
 						}
-						this.startRenameProcess(file, this.settings.autoRename)
+						await this.handleNewImage(file, this.settings.autoRename)
 					}
 				}
 			})
@@ -127,6 +139,15 @@ export default class PasteImageRenamePlugin extends Plugin {
 		// add settings tab
 		this.addSettingTab(new SettingTab(this.app, this));
 
+	}
+
+	// Handle new image: compress first, then rename
+	async handleNewImage(file: TFile, autoRename = false) {
+		// Compress image first if enabled (might return a different file if format changed)
+		const processedFile = await this.compressImage(file)
+
+		// Then proceed with the existing rename process using the processed file
+		this.startRenameProcess(processedFile, autoRename)
 	}
 
 	async startRenameProcess(file: TFile, autoRename = false) {
@@ -292,6 +313,120 @@ export default class PasteImageRenamePlugin extends Plugin {
 			newName: stem + '.' + file.extension,
 			isMeaningful: stem.replace(meaninglessRegex, '') !== '',
 		}
+	}
+
+	// Compress image file if compression is enabled
+	async compressImage(file: TFile): Promise<TFile> {
+		if (!this.settings.enableCompression) {
+			return file
+		}
+
+		try {
+			// Only compress image files
+			const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp']
+			if (!imageExtensions.includes(file.extension.toLowerCase())) {
+				return file
+			}
+
+			const buffer = await this.app.vault.readBinary(file)
+			const mimeType = this.getMimeType(file.extension)
+
+			const compressedBuffer = await this.compressImageBuffer(buffer, mimeType, file.extension)
+
+			// Only update if compression actually reduced the size
+			if (compressedBuffer.byteLength < buffer.byteLength) {
+				const savedBytes = buffer.byteLength - compressedBuffer.byteLength
+				const savedMB = savedBytes / (1024 * 1024)
+
+				// Check if format conversion is needed
+				const newExtension = this.settings.outputFormat === 'jpg' ? 'jpg' : file.extension
+				let targetFile = file
+
+				if (newExtension !== file.extension) {
+					// Format conversion: create new file with new extension
+					const newFileName = file.basename + '.' + newExtension
+					const newPath = path.join(file.parent.path, newFileName)
+
+					targetFile = await this.app.vault.createBinary(newPath, compressedBuffer)
+
+					// Remove original file
+					await this.app.vault.delete(file)
+
+					if (!this.settings.disableRenameNotice) {
+						new Notice(`Compressed and converted ${file.name} → ${targetFile.name}: saved ${savedMB.toFixed(2)}MB`)
+					}
+				} else {
+					// Same format: just update the file
+					await this.app.vault.modifyBinary(file, compressedBuffer)
+					targetFile = file
+
+					if (!this.settings.disableRenameNotice) {
+						new Notice(`Compressed ${file.name}: saved ${savedMB.toFixed(2)}MB`)
+					}
+				}
+
+				return targetFile
+			}
+
+			return file
+		} catch (error) {
+			console.error('Error compressing image:', error)
+			return file
+		}
+	}
+
+	// Compress image buffer using Canvas API
+	private async compressImageBuffer(buffer: ArrayBuffer, mimeType: string, originalExtension: string): Promise<ArrayBuffer> {
+		return new Promise((resolve, reject) => {
+			const img = new Image()
+			const canvas = document.createElement('canvas')
+			const ctx = canvas.getContext('2d')
+
+			img.onload = () => {
+				// Calculate new dimensions
+				let { width, height } = img
+				if (width > this.settings.maxWidth || height > this.settings.maxHeight) {
+					const ratio = Math.min(this.settings.maxWidth / width, this.settings.maxHeight / height)
+					width = Math.floor(width * ratio)
+					height = Math.floor(height * ratio)
+				}
+
+				// Set canvas size
+				canvas.width = width
+				canvas.height = height
+
+				// Draw and compress
+				ctx?.drawImage(img, 0, 0, width, height)
+
+				// Determine output format
+				const outputFormat = this.settings.outputFormat === 'jpg' ? 'image/jpeg' : 'image/png'
+				const quality = outputFormat === 'image/jpeg' ? this.settings.jpgQuality / 100 : undefined
+
+				canvas.toBlob((blob) => {
+					if (blob) {
+						blob.arrayBuffer().then(resolve).catch(reject)
+					} else {
+						reject(new Error('Failed to compress image'))
+					}
+				}, outputFormat, quality)
+			}
+
+			img.onerror = () => reject(new Error('Failed to load image'))
+			img.src = URL.createObjectURL(new Blob([buffer], { type: mimeType }))
+		})
+	}
+
+	// Get MIME type from file extension
+	private getMimeType(extension: string): string {
+		const mimeTypes: { [key: string]: string } = {
+			'png': 'image/png',
+			'jpg': 'image/jpeg',
+			'jpeg': 'image/jpeg',
+			'gif': 'image/gif',
+			'bmp': 'image/bmp',
+			'webp': 'image/webp'
+		}
+		return mimeTypes[extension.toLowerCase()] || 'image/png'
 	}
 
 	// newName: foo.ext
@@ -675,5 +810,67 @@ class SettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}
 			));
+
+		// Image Compression Settings Section
+		containerEl.createEl('h3', { text: 'Image Compression Settings' });
+
+		new Setting(containerEl)
+			.setName('Enable compression')
+			.setDesc('Automatically compress images to reduce file size when they are pasted or added to the vault.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableCompression)
+				.onChange(async (value) => {
+					this.plugin.settings.enableCompression = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Output format')
+			.setDesc('Format to save compressed images as. JPG typically provides better compression.')
+			.addDropdown(dropdown => dropdown
+				.addOption('png', 'PNG (Lossless)')
+				.addOption('jpg', 'JPG (Lossy, smaller)')
+				.setValue(this.plugin.settings.outputFormat)
+				.onChange(async (value: 'png' | 'jpg') => {
+					this.plugin.settings.outputFormat = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('JPG quality')
+			.setDesc('Quality for JPG compression (1-100). Higher values = better quality but larger files.')
+			.addSlider(slider => slider
+				.setLimits(1, 100, 5)
+				.setValue(this.plugin.settings.jpgQuality)
+				.onChange(async (value) => {
+					this.plugin.settings.jpgQuality = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Maximum width')
+			.setDesc('Maximum width in pixels for resized images. Larger images will be scaled down.')
+			.addText(text => text
+				.setValue(this.plugin.settings.maxWidth.toString())
+				.onChange(async (value) => {
+					const numValue = parseInt(value);
+					if (!isNaN(numValue) && numValue > 0) {
+						this.plugin.settings.maxWidth = numValue;
+						await this.plugin.saveSettings();
+					}
+				}));
+
+		new Setting(containerEl)
+			.setName('Maximum height')
+			.setDesc('Maximum height in pixels for resized images. Larger images will be scaled down.')
+			.addText(text => text
+				.setValue(this.plugin.settings.maxHeight.toString())
+				.onChange(async (value) => {
+					const numValue = parseInt(value);
+					if (!isNaN(numValue) && numValue > 0) {
+						this.plugin.settings.maxHeight = numValue;
+						await this.plugin.saveSettings();
+					}
+				}));
 	}
 }

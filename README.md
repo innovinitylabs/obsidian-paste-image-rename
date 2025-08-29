@@ -2,6 +2,8 @@
 
 > :loudspeaker: Starting from 1.4.0, Paste image rename becomes a general-purpose renaming plugin
 > that can handle all attachments added to the vault.
+>
+> :new: **NEW in 1.7.0**: Added automatic image compression to reduce file sizes!
 
 This plugin is inspired by Zettlr, Zettlr shows a prompt that allows the user to rename the image, this is a great help if you want your images to be named and organized clearly.
 
@@ -22,6 +24,7 @@ Paste image rename plugin not only implements Zettlr's feature, but also allows 
     - [Batch renaming process](#batch-renaming-process)
     - [Batch rename all images instantly](#batch-rename-all-images-instantly)
     - [Handle all attachments](#handle-all-attachments)
+    - [Image compression](#image-compression)
   - [FAQ](#faq)
   - [Settings](#settings)
 
@@ -119,6 +122,37 @@ To use this feature, you need to enable the "Handle all attachments" option in s
 Additionally, you can configure the "Exclude extension pattern" to ignore files
 that match the given extension pattern.
 
+### Image compression
+
+> New in 1.7.0
+
+The plugin now includes automatic image compression to reduce file sizes, which is especially useful for high-resolution screenshots from 4K displays.
+
+**Key features:**
+- **Automatic compression** of pasted images
+- **Resize large images** to specified maximum dimensions
+- **Format conversion** (PNG to JPG for better compression)
+- **Configurable quality settings** for JPG compression
+- **Size reporting** showing bytes saved
+
+**How it works:**
+1. When you paste an image, it's automatically compressed before being renamed
+2. Large images are resized to your specified maximum dimensions
+3. Images can be converted from PNG to JPG for better compression ratios
+4. You'll see a notification showing how much space was saved
+
+**Example:**
+- Original: 2.5MB PNG screenshot
+- Compressed: 200KB JPG (90% size reduction!)
+
+**Compression settings:**
+- **Enable compression**: Turn on/off automatic compression
+- **Output format**: Choose PNG (lossless) or JPG (lossy, smaller)
+- **JPG quality**: Quality setting for JPG compression (1-100)
+- **Maximum width/height**: Resize images larger than these dimensions
+
+This feature helps keep your vault size manageable while maintaining image quality suitable for note-taking.
+
 
 ## FAQ
 
@@ -163,4 +197,28 @@ that match the given extension pattern.
 - **Disable rename notice**
 
   Turn off this option if you don't want to see the notice when renaming images.
-	Note that Obsidian may display a notice when a link has changed, this option cannot disable that.
+  Note that Obsidian may display a notice when a link has changed, this option cannot disable that.
+
+#### Image Compression Settings
+
+> New in 1.7.0
+
+- **Enable compression**
+
+  Automatically compress images to reduce file size when they are pasted or added to the vault.
+
+- **Output format**
+
+  Format to save compressed images as. JPG typically provides better compression than PNG.
+
+- **JPG quality**
+
+  Quality setting for JPG compression (1-100). Higher values mean better quality but larger files.
+
+- **Maximum width**
+
+  Maximum width in pixels for resized images. Images larger than this will be scaled down proportionally.
+
+- **Maximum height**
+
+  Maximum height in pixels for resized images. Images larger than this will be scaled down proportionally.
