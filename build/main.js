@@ -385,6 +385,211 @@ var ImageBatchRenameModal = class extends import_obsidian.Modal {
     state.renameTasks = renameTasks;
   }
 };
+var ImageBatchConversionModal = class extends import_obsidian.Modal {
+  constructor(app, activeFile, conversionFunc, onClose, plugin) {
+    super(app);
+    this.activeFile = activeFile;
+    this.conversionFunc = conversionFunc;
+    this.onCloseExtra = onClose;
+    this.plugin = plugin;
+    this.state = {
+      namePattern: "",
+      extPattern: "",
+      targetFormat: "webp",
+      conversionTasks: []
+    };
+  }
+  onOpen() {
+    this.containerEl.addClass("image-rename-modal");
+    const { contentEl, titleEl } = this;
+    titleEl.setText("Batch convert image formats");
+    const namePatternSetting = new import_obsidian.Setting(contentEl).setName("Name pattern").setDesc("Please input the name pattern to match files (regex)").addText((text) => text.setValue(this.state.namePattern).onChange(
+      (value) => __async(this, null, function* () {
+        this.state.namePattern = value;
+      })
+    ));
+    const npInputEl = namePatternSetting.controlEl.children[0];
+    npInputEl.focus();
+    const npInputState = lockInputMethodComposition(npInputEl);
+    npInputEl.addEventListener("keydown", (e) => __async(this, null, function* () {
+      if (e.key === "Enter" && !npInputState.lock) {
+        e.preventDefault();
+        if (!this.state.namePattern) {
+          errorEl.innerText = 'Error: "Name pattern" could not be empty';
+          errorEl.style.display = "block";
+          return;
+        }
+        this.matchImageNames(tbodyEl);
+      }
+    }));
+    const extPatternSetting = new import_obsidian.Setting(contentEl).setName("Extension pattern").setDesc("Please input the extension pattern to match files (regex)").addText((text) => text.setValue(this.state.extPattern).onChange(
+      (value) => __async(this, null, function* () {
+        this.state.extPattern = value;
+      })
+    ));
+    const extInputEl = extPatternSetting.controlEl.children[0];
+    extInputEl.addEventListener("keydown", (e) => __async(this, null, function* () {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        this.matchImageNames(tbodyEl);
+      }
+    }));
+    const formatSetting = new import_obsidian.Setting(contentEl).setName("Target format").setDesc("Choose the format to convert images to").addDropdown((dropdown) => {
+      dropdown.addOption("jpg", "JPG").addOption("webp", "WebP").addOption("png", "PNG");
+      if (this.plugin.supportsAvif()) {
+        dropdown.addOption("avif", "AVIF");
+      }
+      dropdown.setValue(this.state.targetFormat).onChange((value) => __async(this, null, function* () {
+        this.state.targetFormat = value;
+        this.matchImageNames(tbodyEl);
+      }));
+    });
+    const matchedContainer = contentEl.createDiv({
+      cls: "matched-container"
+    });
+    const tableET = createElementTree(matchedContainer, {
+      tag: "table",
+      children: [
+        {
+          tag: "thead",
+          children: [
+            {
+              tag: "tr",
+              children: [
+                {
+                  tag: "td",
+                  text: "Original path"
+                },
+                {
+                  tag: "td",
+                  text: "Target Format"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          tag: "tbody"
+        }
+      ]
+    });
+    const tbodyEl = tableET.children[1].el;
+    const errorEl = contentEl.createDiv({
+      cls: "error",
+      attr: {
+        style: "display: none;"
+      }
+    });
+    new import_obsidian.Setting(contentEl).addButton((button) => {
+      button.setButtonText("Convert all").setClass("mod-cta").onClick(() => {
+        new ConfirmModal(
+          this.app,
+          "Confirm convert all",
+          `Are you sure? This will convert all the ${this.state.conversionTasks.length} images matched the pattern to ${this.state.targetFormat.toUpperCase()} format.`,
+          () => {
+            this.convertAll();
+            this.close();
+          }
+        ).open();
+      });
+    }).addButton((button) => {
+      button.setButtonText("Cancel").onClick(() => {
+        this.close();
+      });
+    });
+  }
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.onCloseExtra();
+  }
+  convertAll() {
+    return __async(this, null, function* () {
+      debugLog("convertAll", this.state);
+      for (const task of this.state.conversionTasks) {
+        yield this.conversionFunc(task.file, task.targetFormat);
+      }
+    });
+  }
+  matchImageNames(tbodyEl) {
+    const { state } = this;
+    const conversionTasks = [];
+    tbodyEl.empty();
+    const fileCache = this.app.metadataCache.getFileCache(this.activeFile);
+    if (!fileCache || !fileCache.embeds)
+      return;
+    const namePatternRegex = new RegExp(state.namePattern, "g");
+    const extPatternRegex = new RegExp(state.extPattern);
+    const imageExtensionRegex = /jpe?g|png|gif|tiff|webp|avif/i;
+    fileCache.embeds.forEach((embed) => {
+      const file = this.app.metadataCache.getFirstLinkpathDest(embed.link, this.activeFile.path);
+      if (!file) {
+        console.warn("file not found", embed.link);
+        return;
+      }
+      if (!imageExtensionRegex.test(file.extension)) {
+        return;
+      }
+      if (state.extPattern) {
+        const m0 = extPatternRegex.exec(file.extension);
+        if (!m0)
+          return;
+      }
+      const stem = file.basename;
+      namePatternRegex.lastIndex = 0;
+      const m1 = namePatternRegex.exec(stem);
+      if (!m1)
+        return;
+      if (file.extension.toLowerCase() === state.targetFormat.toLowerCase()) {
+        debugLog("Skipping file already in target format:", file.name);
+        return;
+      }
+      conversionTasks.push({
+        file,
+        targetFormat: state.targetFormat
+      });
+      createElementTree(tbodyEl, {
+        tag: "tr",
+        children: [
+          {
+            tag: "td",
+            children: [
+              {
+                tag: "span",
+                text: file.name
+              },
+              {
+                tag: "div",
+                text: file.path,
+                attr: {
+                  class: "file-path"
+                }
+              }
+            ]
+          },
+          {
+            tag: "td",
+            children: [
+              {
+                tag: "span",
+                text: state.targetFormat.toUpperCase()
+              },
+              {
+                tag: "div",
+                text: `${file.basename}.${state.targetFormat}`,
+                attr: {
+                  class: "file-path"
+                }
+              }
+            ]
+          }
+        ]
+      });
+    });
+    debugLog("new conversionTasks", conversionTasks);
+    state.conversionTasks = conversionTasks;
+  }
+};
 var ConfirmModal = class extends import_obsidian.Modal {
   constructor(app, title, message, onConfirm) {
     super(app);
@@ -523,6 +728,28 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
       });
       if (DEBUG) {
         this.addRibbonIcon("wand-glyph", "Batch rename all images instantly (in the current file)", batchRenameAllImages);
+      }
+      const startBatchConversionProcess = () => {
+        this.openBatchConversionModal();
+      };
+      this.addCommand({
+        id: "batch-convert-images",
+        name: "Batch convert image formats (in the current file)",
+        callback: startBatchConversionProcess
+      });
+      if (DEBUG) {
+        this.addRibbonIcon("compress-glyph", "Batch convert image formats", startBatchConversionProcess);
+      }
+      const batchConvertAllImages = () => {
+        this.batchConvertAllImages();
+      };
+      this.addCommand({
+        id: "batch-convert-all-images",
+        name: "Batch convert all images to optimal format (in the current file)",
+        callback: batchConvertAllImages
+      });
+      if (DEBUG) {
+        this.addRibbonIcon("compress-glyph", "Batch convert all images to optimal format", batchConvertAllImages);
       }
       this.addSettingTab(new SettingTab(this.app, this));
     });
@@ -665,6 +892,93 @@ var PasteImageRenamePlugin = class extends import_obsidian2.Plugin {
     );
     this.modals.push(modal);
     modal.open();
+  }
+  openBatchConversionModal() {
+    const activeFile = this.getActiveFile();
+    const modal = new ImageBatchConversionModal(
+      this.app,
+      activeFile,
+      (file, targetFormat) => __async(this, null, function* () {
+        debugLog("Converting file:", file.path, "to format:", targetFormat);
+        const originalLinkText = this.app.fileManager.generateMarkdownLink(file, activeFile.path);
+        const compressedFile = yield this.compressToFormat(file, targetFormat);
+        if (compressedFile) {
+          const { newName } = this.generateNewName(compressedFile, activeFile);
+          const { stem, extension } = yield this.deduplicateNewName(newName, compressedFile);
+          const finalName = stem + "." + extension;
+          const finalPath = compressedFile.parent.path + "/" + finalName;
+          const renamedFile = yield this.app.fileManager.renameFile(compressedFile, finalPath);
+          const finalFile = this.app.vault.getAbstractFileByPath(finalPath);
+          if (finalFile) {
+            const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path);
+            const editor = this.getActiveEditor();
+            if (editor && originalLinkText !== newLinkText) {
+              const content = editor.getValue();
+              const updatedContent = content.replace(originalLinkText, newLinkText);
+              editor.setValue(updatedContent);
+              debugLog("Updated link in batch conversion:", originalLinkText, "\u2192", newLinkText);
+            }
+          }
+          new import_obsidian2.Notice(`Successfully converted and renamed: ${file.name} \u2192 ${finalName}`);
+        } else {
+          new import_obsidian2.Notice(`Failed to convert: ${file.name}`);
+        }
+      }),
+      () => {
+        this.modals.splice(this.modals.indexOf(modal), 1);
+      },
+      this
+    );
+    this.modals.push(modal);
+    modal.open();
+  }
+  batchConvertAllImages() {
+    return __async(this, null, function* () {
+      const activeFile = this.getActiveFile();
+      const fileCache = this.app.metadataCache.getFileCache(activeFile);
+      if (!fileCache || !fileCache.embeds)
+        return;
+      const extPatternRegex = /jpe?g|png|gif|tiff|webp|avif/i;
+      let convertedCount = 0;
+      for (const embed of fileCache.embeds) {
+        const file = this.app.metadataCache.getFirstLinkpathDest(embed.link, activeFile.path);
+        if (!file) {
+          console.warn("file not found", embed.link);
+          continue;
+        }
+        const m0 = extPatternRegex.exec(file.extension);
+        if (!m0)
+          continue;
+        const optimalFormat = this.getOptimalDefaultFormat(file.extension);
+        if (file.extension.toLowerCase() === optimalFormat.toLowerCase()) {
+          debugLog("Skipping file already in optimal format:", file.name);
+          continue;
+        }
+        debugLog("Converting file to optimal format:", file.name, "\u2192", optimalFormat);
+        const originalLinkText = this.app.fileManager.generateMarkdownLink(file, activeFile.path);
+        const compressedFile = yield this.compressToFormat(file, optimalFormat);
+        if (compressedFile) {
+          const { newName } = this.generateNewName(compressedFile, activeFile);
+          const { stem, extension } = yield this.deduplicateNewName(newName, compressedFile);
+          const finalName = stem + "." + extension;
+          const finalPath = compressedFile.parent.path + "/" + finalName;
+          const renamedFile = yield this.app.fileManager.renameFile(compressedFile, finalPath);
+          const finalFile = this.app.vault.getAbstractFileByPath(finalPath);
+          if (finalFile) {
+            const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path);
+            const editor = this.getActiveEditor();
+            if (editor && originalLinkText !== newLinkText) {
+              const content = editor.getValue();
+              const updatedContent = content.replace(originalLinkText, newLinkText);
+              editor.setValue(updatedContent);
+              debugLog("Updated link in batch conversion:", originalLinkText, "\u2192", newLinkText);
+            }
+          }
+          convertedCount++;
+        }
+      }
+      new import_obsidian2.Notice(`Batch conversion complete: ${convertedCount} images converted to optimal format`);
+    });
   }
   batchRenameAllImages() {
     return __async(this, null, function* () {

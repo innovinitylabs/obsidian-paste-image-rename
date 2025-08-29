@@ -22,7 +22,7 @@ import {
   TFile,
 } from 'obsidian';
 
-import { ImageBatchRenameModal } from './batch';
+import { ImageBatchRenameModal, ImageBatchConversionModal } from './batch';
 import { renderTemplate } from './template';
 import {
   createElementTree,
@@ -148,6 +148,31 @@ export default class PasteImageRenamePlugin extends Plugin {
 		})
 		if (DEBUG) {
 			this.addRibbonIcon('wand-glyph', 'Batch rename all images instantly (in the current file)', batchRenameAllImages)
+		}
+
+		// Add batch conversion commands
+		const startBatchConversionProcess = () => {
+			this.openBatchConversionModal()
+		}
+		this.addCommand({
+			id: 'batch-convert-images',
+			name: 'Batch convert image formats (in the current file)',
+			callback: startBatchConversionProcess,
+		})
+		if (DEBUG) {
+			this.addRibbonIcon('compress-glyph', 'Batch convert image formats', startBatchConversionProcess)
+		}
+
+		const batchConvertAllImages = () => {
+			this.batchConvertAllImages()
+		}
+		this.addCommand({
+			id: 'batch-convert-all-images',
+			name: 'Batch convert all images to optimal format (in the current file)',
+			callback: batchConvertAllImages,
+		})
+		if (DEBUG) {
+			this.addRibbonIcon('compress-glyph', 'Batch convert all images to optimal format', batchConvertAllImages)
 		}
 
 		// add settings tab
@@ -325,6 +350,125 @@ export default class PasteImageRenamePlugin extends Plugin {
 		)
 		this.modals.push(modal)
 		modal.open()
+	}
+
+	openBatchConversionModal() {
+		const activeFile = this.getActiveFile()
+		const modal = new ImageBatchConversionModal(
+			this.app,
+			activeFile,
+			async (file: TFile, targetFormat: string) => {
+				debugLog('Converting file:', file.path, 'to format:', targetFormat)
+				
+				// Capture original link text BEFORE compression
+				const originalLinkText = this.app.fileManager.generateMarkdownLink(file, activeFile.path)
+				
+				const compressedFile = await this.compressToFormat(file, targetFormat)
+				if (compressedFile) {
+					// Generate a proper name for the converted file
+					const { newName } = this.generateNewName(compressedFile, activeFile)
+					// Deduplicate and rename the file
+					const { stem, extension } = await this.deduplicateNewName(newName, compressedFile)
+					const finalName = stem + '.' + extension
+					
+					// Rename the compressed file
+					const finalPath = compressedFile.parent.path + '/' + finalName
+					const renamedFile = await this.app.fileManager.renameFile(compressedFile, finalPath)
+					
+					// Get fresh reference to the final file
+					const finalFile = this.app.vault.getAbstractFileByPath(finalPath) as TFile
+					if (finalFile) {
+						// Generate new link text for the final file
+						const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path)
+						
+						// Update the link in the editor
+						const editor = this.getActiveEditor()
+						if (editor && originalLinkText !== newLinkText) {
+							const content = editor.getValue()
+							const updatedContent = content.replace(originalLinkText, newLinkText)
+							editor.setValue(updatedContent)
+							debugLog('Updated link in batch conversion:', originalLinkText, '→', newLinkText)
+						}
+					}
+					
+					new Notice(`Successfully converted and renamed: ${file.name} → ${finalName}`)
+				} else {
+					new Notice(`Failed to convert: ${file.name}`)
+				}
+			},
+			() => {
+				this.modals.splice(this.modals.indexOf(modal), 1)
+			},
+			this
+		)
+		this.modals.push(modal)
+		modal.open()
+	}
+
+	async batchConvertAllImages() {
+		const activeFile = this.getActiveFile()
+		const fileCache = this.app.metadataCache.getFileCache(activeFile)
+		if (!fileCache || !fileCache.embeds) return
+		const extPatternRegex = /jpe?g|png|gif|tiff|webp|avif/i
+
+		let convertedCount = 0
+		for (const embed of fileCache.embeds) {
+			const file = this.app.metadataCache.getFirstLinkpathDest(embed.link, activeFile.path)
+			if (!file) {
+				console.warn('file not found', embed.link)
+				continue
+			}
+			// match ext
+			const m0 = extPatternRegex.exec(file.extension)
+			if (!m0) continue
+
+			// Determine optimal format
+			const optimalFormat = this.getOptimalDefaultFormat(file.extension)
+			
+			// Skip if already in optimal format
+			if (file.extension.toLowerCase() === optimalFormat.toLowerCase()) {
+				debugLog('Skipping file already in optimal format:', file.name)
+				continue
+			}
+
+			debugLog('Converting file to optimal format:', file.name, '→', optimalFormat)
+			
+			// Capture original link text BEFORE compression
+			const originalLinkText = this.app.fileManager.generateMarkdownLink(file, activeFile.path)
+			
+			const compressedFile = await this.compressToFormat(file, optimalFormat)
+			if (compressedFile) {
+				// Generate a proper name for the converted file
+				const { newName } = this.generateNewName(compressedFile, activeFile)
+				// Deduplicate and rename the file
+				const { stem, extension } = await this.deduplicateNewName(newName, compressedFile)
+				const finalName = stem + '.' + extension
+				
+				// Rename the compressed file
+				const finalPath = compressedFile.parent.path + '/' + finalName
+				const renamedFile = await this.app.fileManager.renameFile(compressedFile, finalPath)
+				
+				// Get fresh reference to the final file
+				const finalFile = this.app.vault.getAbstractFileByPath(finalPath) as TFile
+				if (finalFile) {
+					// Generate new link text for the final file
+					const newLinkText = this.app.fileManager.generateMarkdownLink(finalFile, activeFile.path)
+					
+					// Update the link in the editor
+					const editor = this.getActiveEditor()
+					if (editor && originalLinkText !== newLinkText) {
+						const content = editor.getValue()
+						const updatedContent = content.replace(originalLinkText, newLinkText)
+						editor.setValue(updatedContent)
+						debugLog('Updated link in batch conversion:', originalLinkText, '→', newLinkText)
+					}
+				}
+				
+				convertedCount++
+			}
+		}
+		
+		new Notice(`Batch conversion complete: ${convertedCount} images converted to optimal format`)
 	}
 
 	async batchRenameAllImages() {
